@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "antibodysystem-docs": {
+      "command": "node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/branded-docs/src/mcp-server.js"
+      ],
+      "description": "AntibodySystem branded document generator - creates professional PDFs with company branding"
+    }
+  }
+}

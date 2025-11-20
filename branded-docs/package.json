@@ -1,0 +1,47 @@
+{
+  "name": "antibodysystem-branded-docs",
+  "version": "1.0.0",
+  "description": "Branded document generator for AntibodySystem - Create professional PDFs, reports, proposals, and presentations with your company branding",
+  "main": "src/generators/pdf-generator.js",
+  "bin": {
+    "ab-docs": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node src/cli.js list",
+    "example:letterhead": "node src/cli.js generate letterhead examples/data/letterhead-example.json output/letterhead-example.pdf",
+    "example:report": "node src/cli.js generate report examples/data/report-example.json output/report-example.pdf",
+    "example:proposal": "node src/cli.js generate proposal examples/data/proposal-example.json output/proposal-example.pdf",
+    "example:presentation": "node src/cli.js generate presentation examples/data/presentation-example.json output/presentation-example.pdf",
+    "examples:all": "npm run example:letterhead && npm run example:report && npm run example:proposal && npm run example:presentation",
+    "templates:create": "node scripts/create-all-templates.js"
+  },
+  "keywords": [
+    "pdf",
+    "document-generator",
+    "branding",
+    "templates",
+    "puppeteer",
+    "antibodysystem",
+    "letterhead",
+    "reports",
+    "proposals",
+    "presentations"
+  ],
+  "author": "AntibodySystem",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^21.5.0"
+  },
+  "config": {
+    "puppeteer_skip_chromium_download": true
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antibodysystem/branded-docs"
+  }
+}
