@@ -1,0 +1,734 @@
+{
+  "name": "竞争对手广告监控工作流",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1,4"
+            }
+          ]
+        }
+      },
+      "name": "定时触发器",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "id": "trigger-node",
+      "notes": "每周一和周四上午9点触发"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "crawlDate",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "crawlTimestamp",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "设置爬取时间",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "id": "set-date-node"
+    },
+    {
+      "parameters": {
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/YOUR_SPREADSHEET_ID/values/Competitors!A2:C",
+        "authentication": "oAuth2",
+        "options": {}
+      },
+      "name": "读取竞争对手列表",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 300],
+      "id": "read-competitors-node",
+      "notes": "从Google Sheets读取竞争对手配置\n格式: 竞争对手名称 | 广告库URL | 是否启用"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "遍历竞争对手",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [850, 300],
+      "id": "loop-competitors-node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const competitor = $input.item.json;\nconst competitorName = competitor.values[0][0];\nconst adLibraryUrl = competitor.values[0][1];\nconst enabled = competitor.values[0][2];\n\nif (enabled !== 'TRUE' && enabled !== '是') {\n  return { enabled: false };\n}\n\nreturn {\n  competitorName,\n  adLibraryUrl,\n  enabled: true,\n  crawlDate: $('设置爬取时间').item.json.crawlDate\n};"
+      },
+      "name": "解析竞争对手信息",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300],
+      "id": "parse-competitor-node"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.enabled }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "检查是否启用",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "id": "check-enabled-node"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.adLibraryUrl }}",
+        "method": "GET",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "maxRetries": 3,
+            "retryDelay": 5000
+          }
+        }
+      },
+      "name": "爬取广告数据",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 250],
+      "id": "scrape-ads-node",
+      "notes": "根据实际广告平台调整爬取方式\n可能需要使用Puppeteer或专用API"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析爬取到的广告数据\nconst html = $input.item.json.data;\nconst competitorName = $('解析竞争对手信息').item.json.competitorName;\nconst crawlDate = $('解析竞争对手信息').item.json.crawlDate;\n\n// 这里需要根据实际HTML结构解析\n// 示例：使用cheerio解析HTML\nconst cheerio = require('cheerio');\nconst $ = cheerio.load(html);\n\nconst ads = [];\n\n// 示例选择器，需要根据实际情况调整\n$('.ad-item').each((index, element) => {\n  const ad = {\n    competitorName,\n    crawlDate,\n    adId: $(element).attr('data-ad-id') || `ad_${Date.now()}_${index}`,\n    adTitle: $(element).find('.ad-title').text().trim(),\n    adDescription: $(element).find('.ad-description').text().trim(),\n    adCopy: $(element).find('.ad-copy').text().trim(),\n    callToAction: $(element).find('.cta-button').text().trim(),\n    imageUrls: [],\n    videoUrls: [],\n    landingPageUrl: $(element).find('.ad-link').attr('href'),\n    platform: '未知',\n    adFormat: 'unknown',\n    impressions: $(element).find('.impressions').text().trim() || 'N/A',\n    engagement: $(element).find('.engagement').text().trim() || 'N/A',\n    startDate: $(element).find('.start-date').text().trim() || crawlDate,\n    isActive: true\n  };\n  \n  // 提取图片URLs\n  $(element).find('img').each((i, img) => {\n    const src = $(img).attr('src');\n    if (src && !src.includes('placeholder')) {\n      ad.imageUrls.push(src);\n    }\n  });\n  \n  // 提取视频URLs\n  $(element).find('video source').each((i, video) => {\n    const src = $(video).attr('src');\n    if (src) {\n      ad.videoUrls.push(src);\n    }\n  });\n  \n  // 判断广告格式\n  if (ad.videoUrls.length > 0) {\n    ad.adFormat = 'video';\n  } else if (ad.imageUrls.length > 1) {\n    ad.adFormat = 'carousel';\n  } else if (ad.imageUrls.length === 1) {\n    ad.adFormat = 'image';\n  } else {\n    ad.adFormat = 'text';\n  }\n  \n  ads.push(ad);\n});\n\nreturn ads.map(ad => ({ json: ad }));"
+      },
+      "name": "解析广告数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 250],
+      "id": "parse-ads-node",
+      "notes": "解析HTML提取广告信息\n需要根据实际广告平台调整选择器"
+    },
+    {
+      "parameters": {
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/YOUR_SPREADSHEET_ID/values/AdsData!A:A",
+        "authentication": "oAuth2",
+        "options": {}
+      },
+      "name": "检查广告是否已存在",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1850, 250],
+      "id": "check-duplicate-node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const existingAdIds = $('检查广告是否已存在').item.json.values || [];\nconst currentAd = $input.item.json;\n\n// 检查广告ID是否已存在\nconst isDuplicate = existingAdIds.some(row => row[0] === currentAd.adId);\n\nreturn {\n  ...currentAd,\n  isDuplicate\n};"
+      },
+      "name": "判断是否重复",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2050, 250],
+      "id": "check-duplicate-logic-node"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isDuplicate }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "name": "过滤重复广告",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2250, 250],
+      "id": "filter-duplicate-node"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "YOUR_SPREADSHEET_ID",
+        "range": "AdsData!A:T",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        }
+      },
+      "name": "保存到Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [2450, 200],
+      "id": "save-to-sheets-node",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIALS_ID",
+          "name": "Google Sheets Account"
+        }
+      },
+      "notes": "保存广告数据到主表格"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "遍历图片URL",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2650, 150],
+      "id": "loop-images-node"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.imageUrls[$index] }}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "下载图片",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2850, 150],
+      "id": "download-image-node"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+        "name": "={{ $json.competitorName }}/图片/{{ $json.crawlDate }}/{{ $json.adId }}_image_{{ $index }}.jpg",
+        "options": {}
+      },
+      "name": "上传图片到Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [3050, 150],
+      "id": "upload-image-node",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIALS_ID",
+          "name": "Google Drive Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "遍历视频URL",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2650, 300],
+      "id": "loop-videos-node"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.videoUrls[$index] }}",
+        "method": "GET",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "下载视频",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2850, 300],
+      "id": "download-video-node"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "folderId": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+        "name": "={{ $json.competitorName }}/视频/{{ $json.crawlDate }}/{{ $json.adId }}_video_{{ $index }}.mp4",
+        "options": {}
+      },
+      "name": "上传视频到Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [3050, 300],
+      "id": "upload-video-node",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIALS_ID",
+          "name": "Google Drive Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 等待所有广告处理完成后汇总统计\nconst allItems = $input.all();\n\nconst stats = {\n  totalAds: allItems.length,\n  competitors: {},\n  imageCount: 0,\n  videoCount: 0,\n  adFormats: {\n    image: 0,\n    video: 0,\n    carousel: 0,\n    text: 0\n  },\n  crawlDate: allItems[0]?.json.crawlDate || new Date().toISOString().split('T')[0]\n};\n\nallItems.forEach(item => {\n  const ad = item.json;\n  \n  // 统计每个竞争对手的广告数量\n  if (!stats.competitors[ad.competitorName]) {\n    stats.competitors[ad.competitorName] = {\n      count: 0,\n      images: 0,\n      videos: 0\n    };\n  }\n  stats.competitors[ad.competitorName].count++;\n  \n  // 统计媒体文件\n  const imgCount = ad.imageUrls?.length || 0;\n  const vidCount = ad.videoUrls?.length || 0;\n  \n  stats.imageCount += imgCount;\n  stats.videoCount += vidCount;\n  \n  stats.competitors[ad.competitorName].images += imgCount;\n  stats.competitors[ad.competitorName].videos += vidCount;\n  \n  // 统计广告格式\n  if (ad.adFormat) {\n    stats.adFormats[ad.adFormat]++;\n  }\n});\n\n// 计算比例\nstats.imagePercentage = stats.totalAds > 0 ? ((stats.adFormats.image + stats.adFormats.carousel) / stats.totalAds * 100).toFixed(2) + '%' : '0%';\nstats.videoPercentage = stats.totalAds > 0 ? (stats.adFormats.video / stats.totalAds * 100).toFixed(2) + '%' : '0%';\n\nreturn { json: stats };"
+      },
+      "name": "汇总统计数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3250, 250],
+      "id": "aggregate-stats-node"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 准备发送给Claude API的数据\nconst stats = $input.item.json;\nconst allAds = $('过滤重复广告').all().map(item => item.json);\n\n// 构建分析提示词\nconst analysisPrompt = `请分析以下竞争对手广告数据：\n\n## 基本统计\n- 爬取日期：${stats.crawlDate}\n- 总广告数：${stats.totalAds}\n- 图片广告占比：${stats.imagePercentage}\n- 视频广告占比：${stats.videoPercentage}\n\n## 竞争对手明细\n${Object.entries(stats.competitors).map(([name, data]) => \n  `- ${name}: ${data.count}个广告, ${data.images}张图片, ${data.videos}个视频`\n).join('\\n')}\n\n## 广告样本（前10条）\n${allAds.slice(0, 10).map((ad, i) => \n  `${i + 1}. ${ad.competitorName} - ${ad.adTitle}\\n   文案：${ad.adCopy}\\n   CTA：${ad.callToAction}\\n   格式：${ad.adFormat}`\n).join('\\n\\n')}\n\n请提供以下分析：\n1. 广告策略总结\n2. 热门广告创意趋势\n3. 常用文案套路和关键词\n4. 媒体使用偏好（图片vs视频）\n5. 值得关注的优秀广告案例\n6. 与上次相比的变化（如果有历史数据）\n7. 针对我们的建议`;\n\nreturn {\n  json: {\n    stats,\n    analysisPrompt,\n    allAds: allAds.slice(0, 20) // 只保留前20条用于后续处理\n  }\n};"
+      },
+      "name": "准备Claude分析数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3450, 250],
+      "id": "prepare-claude-data-node"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-3-5-sonnet-20241022"
+            },
+            {
+              "name": "max_tokens",
+              "value": "4096"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"user\", \"content\": $json.analysisPrompt}] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Claude API分析",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [3650, 250],
+      "id": "claude-api-node",
+      "credentials": {
+        "anthropicApi": {
+          "id": "YOUR_ANTHROPIC_CREDENTIALS_ID",
+          "name": "Anthropic API"
+        }
+      },
+      "notes": "使用Claude分析广告数据"
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeResponse = $input.item.json.content[0].text;\nconst stats = $('准备Claude分析数据').item.json.stats;\n\nreturn {\n  json: {\n    analysis: claudeResponse,\n    stats\n  }\n};"
+      },
+      "name": "提取分析结果",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3850, 250],
+      "id": "extract-analysis-node"
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@example.com",
+        "toEmail": "recipient@example.com",
+        "subject": "=竞争对手广告监控报告 - {{ $json.stats.crawlDate }}",
+        "emailFormat": "html",
+        "text": "=<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }\n    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }\n    h2 { color: #34495e; margin-top: 30px; }\n    .summary { background: #ecf0f1; padding: 20px; border-radius: 5px; margin: 20px 0; }\n    .stat { display: inline-block; margin: 10px 20px 10px 0; }\n    .stat-label { font-weight: bold; color: #7f8c8d; }\n    .stat-value { font-size: 24px; color: #3498db; font-weight: bold; }\n    .competitor { background: #fff; border-left: 4px solid #3498db; padding: 15px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }\n    .analysis { background: #fff; padding: 20px; border: 1px solid #bdc3c7; border-radius: 5px; margin-top: 20px; white-space: pre-wrap; }\n    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #bdc3c7; color: #7f8c8d; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <h1>🎯 竞争对手广告监控报告</h1>\n  \n  <div class=\"summary\">\n    <h2>📊 数据概览</h2>\n    <div class=\"stat\">\n      <div class=\"stat-label\">爬取日期</div>\n      <div class=\"stat-value\">{{ $json.stats.crawlDate }}</div>\n    </div>\n    <div class=\"stat\">\n      <div class=\"stat-label\">总广告数</div>\n      <div class=\"stat-value\">{{ $json.stats.totalAds }}</div>\n    </div>\n    <div class=\"stat\">\n      <div class=\"stat-label\">图片广告</div>\n      <div class=\"stat-value\">{{ $json.stats.imagePercentage }}</div>\n    </div>\n    <div class=\"stat\">\n      <div class=\"stat-label\">视频广告</div>\n      <div class=\"stat-value\">{{ $json.stats.videoPercentage }}</div>\n    </div>\n  </div>\n  \n  <h2>🏢 竞争对手明细</h2>\n  {{ Object.entries($json.stats.competitors).map(([name, data]) => `\n  <div class=\"competitor\">\n    <h3>${name}</h3>\n    <p>📝 广告数量: <strong>${data.count}</strong> | 🖼️ 图片: <strong>${data.images}</strong> | 🎬 视频: <strong>${data.videos}</strong></p>\n  </div>\n  `).join('') }}\n  \n  <h2>🤖 AI 分析报告</h2>\n  <div class=\"analysis\">{{ $json.analysis }}</div>\n  \n  <div class=\"footer\">\n    <p>此报告由 n8n 自动生成 | 数据存储在 Google Sheets | 媒体文件已保存至 Google Drive</p>\n    <p>如有疑问，请联系团队管理员</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "发送邮件通知",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [4050, 250],
+      "id": "send-email-node",
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIALS_ID",
+          "name": "SMTP Account"
+        }
+      },
+      "notes": "发送HTML格式的精美报告邮件"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "YOUR_SPREADSHEET_ID",
+        "range": "ExecutionLog!A:F",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        }
+      },
+      "name": "记录执行日志",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [4250, 250],
+      "id": "log-execution-node",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIALS_ID",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "name": "错误处理",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [1450, 450],
+      "id": "error-handler-node"
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@example.com",
+        "toEmail": "admin@example.com",
+        "subject": "⚠️ 广告爬取失败通知",
+        "emailFormat": "html",
+        "text": "=<h2>广告爬取出现错误</h2>\n<p><strong>竞争对手:</strong> {{ $json.competitorName }}</p>\n<p><strong>错误时间:</strong> {{ $now.format('yyyy-MM-dd HH:mm:ss') }}</p>\n<p><strong>错误信息:</strong> {{ $json.error }}</p>\n<p>请检查配置并手动重试。</p>",
+        "options": {}
+      },
+      "name": "发送错误通知",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1650, 450],
+      "id": "send-error-email-node",
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIALS_ID",
+          "name": "SMTP Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "定时触发器": {
+      "main": [
+        [
+          {
+            "node": "设置爬取时间",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "设置爬取时间": {
+      "main": [
+        [
+          {
+            "node": "读取竞争对手列表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取竞争对手列表": {
+      "main": [
+        [
+          {
+            "node": "遍历竞争对手",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历竞争对手": {
+      "main": [
+        [
+          {
+            "node": "解析竞争对手信息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析竞争对手信息": {
+      "main": [
+        [
+          {
+            "node": "检查是否启用",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查是否启用": {
+      "main": [
+        [
+          {
+            "node": "爬取广告数据",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "遍历竞争对手",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "爬取广告数据": {
+      "main": [
+        [
+          {
+            "node": "解析广告数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析广告数据": {
+      "main": [
+        [
+          {
+            "node": "检查广告是否已存在",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查广告是否已存在": {
+      "main": [
+        [
+          {
+            "node": "判断是否重复",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "判断是否重复": {
+      "main": [
+        [
+          {
+            "node": "过滤重复广告",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "过滤重复广告": {
+      "main": [
+        [
+          {
+            "node": "保存到Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "保存到Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "遍历图片URL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "遍历视频URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历图片URL": {
+      "main": [
+        [
+          {
+            "node": "下载图片",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "汇总统计数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载图片": {
+      "main": [
+        [
+          {
+            "node": "上传图片到Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "上传图片到Google Drive": {
+      "main": [
+        [
+          {
+            "node": "遍历图片URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历视频URL": {
+      "main": [
+        [
+          {
+            "node": "下载视频",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "汇总统计数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载视频": {
+      "main": [
+        [
+          {
+            "node": "上传视频到Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "上传视频到Google Drive": {
+      "main": [
+        [
+          {
+            "node": "遍历视频URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "汇总统计数据": {
+      "main": [
+        [
+          {
+            "node": "准备Claude分析数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备Claude分析数据": {
+      "main": [
+        [
+          {
+            "node": "Claude API分析",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API分析": {
+      "main": [
+        [
+          {
+            "node": "提取分析结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提取分析结果": {
+      "main": [
+        [
+          {
+            "node": "发送邮件通知",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "发送邮件通知": {
+      "main": [
+        [
+          {
+            "node": "记录执行日志",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "广告监控",
+      "id": "ad-monitoring"
+    },
+    {
+      "name": "竞品分析",
+      "id": "competitor-analysis"
+    }
+  ],
+  "meta": {
+    "instanceId": "your-instance-id"
+  }
+}

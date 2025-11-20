@@ -1,0 +1,5 @@
+竞争对手名称,广告库URL,是否启用,备注
+品牌A,https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=品牌A,TRUE,主要竞争对手
+品牌B,https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=品牌B,TRUE,次要竞争对手
+品牌C,https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=品牌C,FALSE,暂时关闭监控
+品牌D,https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=品牌D,TRUE,新增竞争对手
