@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  server:
+    build: ./server
+    container_name: blog-server
+    ports:
+      - "3001:3001"
+    volumes:
+      # 持久化数据目录
+      - ./server/src/data:/app/src/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - blog-network
+
+  # 前端服务
+  client:
+    build: ./client
+    container_name: blog-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+    networks:
+      - blog-network
+
+networks:
+  blog-network:
+    driver: bridge
+
+volumes:
+  blog-data:
