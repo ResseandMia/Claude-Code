@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const API_URL = '/api/posts'
+// 根据环境变量配置 API 地址
+// 开发环境：使用代理 /api
+// 生产环境：使用环境变量 VITE_API_URL 或默认 /api
+const BASE_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = `${BASE_URL}/api/posts`
 
 export interface PostData {
   title: string

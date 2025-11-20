@@ -2,6 +2,14 @@
 
 一个现代化的、Notion 风格的博客网站，支持富文本编辑、实时保存和文章管理。
 
+## 🚀 快速部署
+
+**想立即部署到云端？**
+
+- 📘 [Zeabur 5分钟快速部署](./QUICK-START-ZEABUR.md) **← 推荐！中文界面，免费额度**
+- 📗 [完整部署指南](./DEPLOYMENT.md) - 包含 Vercel、VPS、Docker 等多种方案
+- 📕 [Zeabur 详细文档](./ZEABUR-DEPLOYMENT.md) - Zeabur 完整教程
+
 ## ✨ 功能特点
 
 - 📝 **富文本编辑器** - 基于 TipTap 的类 Notion 编辑器
