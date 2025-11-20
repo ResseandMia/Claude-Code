@@ -1,6 +1,5 @@
 {
   "build_command": "npm install && npm run build",
   "output_dir": "dist",
-  "framework": "vite",
-  "serverless": false
+  "framework": "static"
 }
