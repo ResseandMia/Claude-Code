@@ -36,7 +36,7 @@ function Editor({ post, onUpdate }: EditorProps) {
 
   // 保存函数（带防抖）
   const handleSave = (() => {
-    let timeout: NodeJS.Timeout
+    let timeout: ReturnType<typeof setTimeout>
     return (newTitle: string, newContent: string) => {
       clearTimeout(timeout)
       setIsSaving(true)
