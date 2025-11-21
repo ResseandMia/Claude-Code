@@ -2,6 +2,29 @@
 
 一个现代化的、Notion 风格的博客网站，支持富文本编辑、实时保存和文章管理。
 
+## 📦 快速下载
+
+**AntibodySystem Branded Document Generator** 现已可用！
+
+### 🎯 推荐下载方式
+
+**从 GitHub Releases 下载**（最稳定）：
+1. 访问本仓库的 [Releases 页面](../../releases)
+2. 下载最新版本：
+   - Windows 用户：下载 `antibodysystem-branded-docs-v1.0.0.zip`
+   - Linux/macOS 用户：下载 `antibodysystem-branded-docs-v1.0.0.tar.gz`
+3. 解压后按照 `DISTRIBUTION-README.md` 说明安装
+
+### 📋 其他下载方式
+
+**直接下载分发包**（需要 git 访问权限）：
+- [antibodysystem-branded-docs-v1.0.0.zip](./antibodysystem-branded-docs-v1.0.0.zip) (Windows)
+- [antibodysystem-branded-docs-v1.0.0.tar.gz](./antibodysystem-branded-docs-v1.0.0.tar.gz) (Linux/macOS)
+
+**完整安装指南**：[📘 DOWNLOAD-INSTRUCTIONS.md](./DOWNLOAD-INSTRUCTIONS.md)
+
+---
+
 ## 🚀 快速部署
 
 **想立即部署到云端？**
