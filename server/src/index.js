@@ -4,6 +4,7 @@ import bodyParser from 'body-parser';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { aiService } from './ai-service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -168,6 +169,102 @@ app.delete('/api/posts/:id', async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete post' });
+  }
+});
+
+// ===================
+// AI Writing Assistant API
+// ===================
+
+// Get AI service status and supported actions
+app.get('/api/ai/status', (req, res) => {
+  res.json({
+    status: 'active',
+    provider: process.env.AI_PROVIDER || 'mock',
+    supportedActions: aiService.supportedActions,
+    message: 'AI Writing Assistant is ready'
+  });
+});
+
+// Process AI request
+app.post('/api/ai/process', async (req, res) => {
+  try {
+    const { action, text, options } = req.body;
+
+    if (!action) {
+      return res.status(400).json({ error: 'Action is required' });
+    }
+
+    if (!text && action !== 'custom') {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    if (!aiService.supportedActions.includes(action)) {
+      return res.status(400).json({
+        error: `Unsupported action: ${action}`,
+        supportedActions: aiService.supportedActions
+      });
+    }
+
+    const result = await aiService.process(action, text, options || {});
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json({ error: result.error || 'AI processing failed' });
+    }
+  } catch (error) {
+    console.error('AI processing error:', error);
+    res.status(500).json({ error: 'Failed to process AI request' });
+  }
+});
+
+// Shortcut endpoints for common actions
+app.post('/api/ai/continue', async (req, res) => {
+  try {
+    const { text, options } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    const result = await aiService.process('continue', text, options || {});
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to continue text' });
+  }
+});
+
+app.post('/api/ai/improve', async (req, res) => {
+  try {
+    const { text, options } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    const result = await aiService.process('improve', text, options || {});
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to improve text' });
+  }
+});
+
+app.post('/api/ai/summarize', async (req, res) => {
+  try {
+    const { text, options } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    const result = await aiService.process('summarize', text, options || {});
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to summarize text' });
+  }
+});
+
+app.post('/api/ai/translate', async (req, res) => {
+  try {
+    const { text, options } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    const result = await aiService.process('translate', text, options || {});
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to translate text' });
   }
 });
 

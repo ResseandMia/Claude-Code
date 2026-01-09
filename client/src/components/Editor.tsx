@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Post } from '../App'
+import AIAssistant from './AIAssistant'
 
 interface EditorProps {
   post: Post
@@ -12,6 +13,8 @@ interface EditorProps {
 function Editor({ post, onUpdate }: EditorProps) {
   const [title, setTitle] = useState(post.title)
   const [isSaving, setIsSaving] = useState(false)
+  const [isAIOpen, setIsAIOpen] = useState(false)
+  const [selectedText, setSelectedText] = useState('')
 
   const editor = useEditor({
     extensions: [
@@ -62,6 +65,57 @@ function Editor({ post, onUpdate }: EditorProps) {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  // Get selected text from editor
+  const getSelectedText = useCallback(() => {
+    if (!editor) return ''
+    const { from, to } = editor.state.selection
+    if (from === to) {
+      // No selection, get all content
+      return editor.getText()
+    }
+    return editor.state.doc.textBetween(from, to, ' ')
+  }, [editor])
+
+  // Handle keyboard shortcut for AI (Cmd+J / Ctrl+J)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
+        e.preventDefault()
+        const text = getSelectedText()
+        setSelectedText(text)
+        setIsAIOpen(true)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [getSelectedText])
+
+  // Open AI assistant with current selection
+  const openAIAssistant = () => {
+    const text = getSelectedText()
+    setSelectedText(text)
+    setIsAIOpen(true)
+  }
+
+  // Insert text at cursor position
+  const handleInsertText = (text: string) => {
+    if (!editor) return
+    editor.chain().focus().insertContent(text).run()
+  }
+
+  // Replace selected text
+  const handleReplaceText = (text: string) => {
+    if (!editor) return
+    const { from, to } = editor.state.selection
+    if (from === to) {
+      // No selection, append to end
+      editor.chain().focus().insertContent(text).run()
+    } else {
+      editor.chain().focus().deleteSelection().insertContent(text).run()
+    }
   }
 
   if (!editor) {
@@ -166,9 +220,21 @@ function Editor({ post, onUpdate }: EditorProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 text-sm text-notion-secondary">
-          {isSaving && <span>保存中...</span>}
-          {!isSaving && <span>已保存</span>}
+        <div className="flex items-center gap-3">
+          {/* AI Assistant Button */}
+          <button
+            onClick={openAIAssistant}
+            className="ai-button px-4 py-2 rounded-lg text-white flex items-center gap-2 font-medium"
+            title="AI 写作助手 (⌘J)"
+          >
+            <span>🤖</span>
+            <span className="hidden sm:inline">AI 助手</span>
+          </button>
+
+          <div className="text-sm text-notion-secondary">
+            {isSaving && <span>保存中...</span>}
+            {!isSaving && <span>已保存</span>}
+          </div>
         </div>
       </div>
 
@@ -193,6 +259,15 @@ function Editor({ post, onUpdate }: EditorProps) {
           <EditorContent editor={editor} />
         </div>
       </div>
+
+      {/* AI Assistant Modal */}
+      <AIAssistant
+        isOpen={isAIOpen}
+        onClose={() => setIsAIOpen(false)}
+        selectedText={selectedText}
+        onInsertText={handleInsertText}
+        onReplaceText={handleReplaceText}
+      />
     </div>
   )
 }
