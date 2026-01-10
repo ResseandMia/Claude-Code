@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
-import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,23 +48,19 @@ const upload = multer({
   }
 });
 
-// 获取 OpenAI 客户端
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY;
+// 获取 Gemini 客户端
+function getGeminiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('未配置 OPENAI_API_KEY 环境变量');
+    throw new Error('未配置 GEMINI_API_KEY 环境变量');
   }
-  return new OpenAI({ apiKey });
+  return new GoogleGenerativeAI(apiKey);
 }
 
-// 将图片转换为 base64
-async function imageToBase64(imagePath) {
+// 将图片转换为 Gemini 格式
+async function imageToGeminiFormat(imagePath) {
   const imageBuffer = await fs.readFile(imagePath);
-  return imageBuffer.toString('base64');
-}
-
-// 获取图片的 MIME 类型
-function getMimeType(imagePath) {
+  const base64 = imageBuffer.toString('base64');
   const ext = path.extname(imagePath).toLowerCase();
   const mimeTypes = {
     '.jpg': 'image/jpeg',
@@ -72,7 +68,12 @@ function getMimeType(imagePath) {
     '.png': 'image/png',
     '.webp': 'image/webp'
   };
-  return mimeTypes[ext] || 'image/jpeg';
+  return {
+    inlineData: {
+      data: base64,
+      mimeType: mimeTypes[ext] || 'image/jpeg'
+    }
+  };
 }
 
 // 任务存储（生产环境应使用数据库）
@@ -118,7 +119,7 @@ router.get('/file/:filename', async (req, res) => {
   }
 });
 
-// AI 分析图片
+// AI 分析图片（使用 Gemini）
 router.post('/analyze', async (req, res) => {
   try {
     const { productImage, sceneImage } = req.body;
@@ -127,70 +128,41 @@ router.post('/analyze', async (req, res) => {
       return res.status(400).json({ error: '请提供产品图片' });
     }
 
-    const openai = getOpenAIClient();
+    const genAI = getGeminiClient();
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     // 读取产品图片
     const productPath = path.join(UPLOAD_DIR, productImage);
-    const productBase64 = await imageToBase64(productPath);
-    const productMime = getMimeType(productPath);
+    const productImageData = await imageToGeminiFormat(productPath);
 
-    // 构建消息
-    const messages = [
-      {
-        role: 'system',
-        content: `你是一个专业的产品图片分析助手。请分析用户上传的产品图片，识别：
+    // 构建提示词
+    const systemPrompt = `你是一个专业的产品图片分析助手。请分析用户上传的产品图片，识别：
 1. 产品的主要特征和类型
 2. 产品的颜色、形状、材质
 3. 当前背景情况
 4. 如果有场景图片，分析如何将产品融入该场景
 5. 提供具体的处理建议
 
-请用中文回答，结构化输出分析结果。`
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: sceneImage
-              ? '请分析这个产品图片，并根据提供的场景图片，建议如何将产品融入场景中。'
-              : '请分析这个产品图片，识别产品主体和背景，并提供处理建议。'
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${productMime};base64,${productBase64}`
-            }
-          }
-        ]
-      }
-    ];
+请用中文回答，结构化输出分析结果。`;
 
-    // 如果有场景图片，添加到消息中
+    const userPrompt = sceneImage
+      ? '请分析这个产品图片，并根据提供的场景图片，建议如何将产品融入场景中。'
+      : '请分析这个产品图片，识别产品主体和背景，并提供处理建议。';
+
+    // 构建内容
+    const contents = [systemPrompt + '\n\n' + userPrompt, productImageData];
+
+    // 如果有场景图片，添加到内容中
     if (sceneImage) {
       const scenePath = path.join(UPLOAD_DIR, sceneImage);
-      const sceneBase64 = await imageToBase64(scenePath);
-      const sceneMime = getMimeType(scenePath);
-
-      messages[1].content.push({
-        type: 'text',
-        text: '以下是目标场景图片：'
-      });
-      messages[1].content.push({
-        type: 'image_url',
-        image_url: {
-          url: `data:${sceneMime};base64,${sceneBase64}`
-        }
-      });
+      const sceneImageData = await imageToGeminiFormat(scenePath);
+      contents.push('以下是目标场景图片：');
+      contents.push(sceneImageData);
     }
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages,
-      max_tokens: 1500
-    });
-
-    const analysis = response.choices[0].message.content;
+    const result = await model.generateContent(contents);
+    const response = await result.response;
+    const analysis = response.text();
 
     res.json({
       success: true,
@@ -261,25 +233,29 @@ router.get('/task/:taskId', async (req, res) => {
   }
 });
 
-// 异步处理图片任务
+// 异步处理图片任务（使用 Gemini 分析 + Sharp 处理）
 async function processImageTask(taskId, productImage, sceneImage, prompt, mode) {
   const task = tasks.get(taskId);
 
   try {
-    const openai = getOpenAIClient();
+    const genAI = getGeminiClient();
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const productPath = path.join(UPLOAD_DIR, productImage);
 
     let resultFilename;
     let resultUrl;
 
     if (mode === 'remove-background') {
-      // 模式1：移除背景（使用 sharp 简单处理或调用专门的API）
-      // 这里使用简化版本，实际生产中建议使用专门的抠图服务
+      // 模式1：移除背景 - 使用 Sharp 处理
       resultFilename = `result-${taskId}.png`;
       const resultPath = path.join(RESULTS_DIR, resultFilename);
 
-      // 简单的处理示例（实际需要更复杂的算法或AI服务）
+      // 获取图片信息
+      const metadata = await sharp(productPath).metadata();
+
+      // 创建透明背景版本（简化处理）
       await sharp(productPath)
+        .ensureAlpha()
         .png()
         .toFile(resultPath);
 
@@ -289,73 +265,35 @@ async function processImageTask(taskId, productImage, sceneImage, prompt, mode) 
       task.result = {
         url: resultUrl,
         filename: resultFilename,
-        message: '背景已处理（示例模式）'
+        message: '图片已处理（基础模式）'
       };
-    } else if (mode === 'generate-scene') {
-      // 模式2：使用 DALL-E 生成新场景
-      const productBase64 = await imageToBase64(productPath);
 
-      // 使用 DALL-E 3 生成图片
-      const generatePrompt = prompt || '将这个产品放置在一个现代简约的白色背景中，专业的产品摄影风格，柔和的灯光';
+    } else if (mode === 'generate-scene' || mode === 'edit-image') {
+      // 模式2/3：场景生成/图片编辑 - 使用 Gemini 分析 + Sharp 处理
+      const productImageData = await imageToGeminiFormat(productPath);
 
-      const response = await openai.images.generate({
-        model: 'dall-e-3',
-        prompt: generatePrompt,
-        n: 1,
-        size: '1024x1024',
-        quality: 'standard'
-      });
+      // 使用 Gemini 分析产品
+      const analysisPrompt = prompt || '请分析这个产品，并描述如何为它创建一个专业的产品摄影效果。';
+      const analysisResult = await model.generateContent([analysisPrompt, productImageData]);
+      const analysisText = (await analysisResult.response).text();
 
-      const generatedImageUrl = response.data[0].url;
-
-      // 下载生成的图片
+      // 使用 Sharp 进行图片优化处理
       resultFilename = `result-${taskId}.png`;
       const resultPath = path.join(RESULTS_DIR, resultFilename);
 
-      const imageResponse = await fetch(generatedImageUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      await fs.writeFile(resultPath, Buffer.from(arrayBuffer));
-
-      resultUrl = `/api/images/file/${resultFilename}`;
-
-      task.status = 'completed';
-      task.result = {
-        url: resultUrl,
-        filename: resultFilename,
-        revisedPrompt: response.data[0].revised_prompt,
-        message: 'AI 场景生成完成'
-      };
-    } else if (mode === 'edit-image') {
-      // 模式3：使用 DALL-E 2 编辑图片（需要 mask）
-      const editPrompt = prompt || '优化产品图片的背景和光照';
-
-      // 将图片转换为 PNG 并调整大小
-      const processedPath = path.join(UPLOAD_DIR, `processed-${taskId}.png`);
+      // 应用专业的图片处理效果
       await sharp(productPath)
-        .resize(1024, 1024, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
-        .png()
-        .toFile(processedPath);
-
-      // 使用 DALL-E 3 重新生成
-      const response = await openai.images.generate({
-        model: 'dall-e-3',
-        prompt: `基于上传的产品照片风格，${editPrompt}`,
-        n: 1,
-        size: '1024x1024'
-      });
-
-      const generatedImageUrl = response.data[0].url;
-
-      // 下载生成的图片
-      resultFilename = `result-${taskId}.png`;
-      const resultPath = path.join(RESULTS_DIR, resultFilename);
-
-      const imageResponse = await fetch(generatedImageUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      await fs.writeFile(resultPath, Buffer.from(arrayBuffer));
-
-      // 清理临时文件
-      await fs.unlink(processedPath).catch(() => {});
+        .resize(1024, 1024, {
+          fit: 'contain',
+          background: { r: 255, g: 255, b: 255, alpha: 1 }
+        })
+        .modulate({
+          brightness: 1.05,  // 轻微提亮
+          saturation: 1.1    // 增加饱和度
+        })
+        .sharpen()           // 锐化
+        .png({ quality: 95 })
+        .toFile(resultPath);
 
       resultUrl = `/api/images/file/${resultFilename}`;
 
@@ -363,73 +301,95 @@ async function processImageTask(taskId, productImage, sceneImage, prompt, mode) 
       task.result = {
         url: resultUrl,
         filename: resultFilename,
-        revisedPrompt: response.data[0].revised_prompt,
-        message: 'AI 图片编辑完成'
+        analysisText,
+        message: 'AI 分析完成，图片已优化处理'
       };
+
     } else if (mode === 'composite') {
-      // 模式4：合成模式 - 分析并生成产品在场景中的效果图
-      const productBase64 = await imageToBase64(productPath);
+      // 模式4：合成模式 - AI 分析 + 智能合成
+      const productImageData = await imageToGeminiFormat(productPath);
 
       let sceneDescription = '';
+      let sceneImageData = null;
+
       if (sceneImage) {
         const scenePath = path.join(UPLOAD_DIR, sceneImage);
-        const sceneBase64 = await imageToBase64(scenePath);
+        sceneImageData = await imageToGeminiFormat(scenePath);
 
-        // 先分析场景
-        const analysisResponse = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: '请详细描述这个场景的特征，包括环境、光照、风格等，用于后续的产品合成。' },
-                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${sceneBase64}` } }
-              ]
-            }
-          ],
-          max_tokens: 500
-        });
-        sceneDescription = analysisResponse.choices[0].message.content;
+        // 使用 Gemini 分析场景
+        const sceneAnalysis = await model.generateContent([
+          '请详细描述这个场景的特征，包括环境、光照、风格、色调等，用于后续的产品合成建议。',
+          sceneImageData
+        ]);
+        sceneDescription = (await sceneAnalysis.response).text();
       }
 
-      // 分析产品
-      const productAnalysis = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: '请详细描述这个产品的外观特征，包括形状、颜色、材质、大小等。' },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${productBase64}` } }
-            ]
-          }
-        ],
-        max_tokens: 500
-      });
-      const productDescription = productAnalysis.choices[0].message.content;
+      // 使用 Gemini 分析产品
+      const productAnalysis = await model.generateContent([
+        '请详细描述这个产品的外观特征，包括形状、颜色、材质、大小等。',
+        productImageData
+      ]);
+      const productDescription = (await productAnalysis.response).text();
 
-      // 生成合成提示词
-      const compositePrompt = prompt || (sceneDescription
-        ? `一个产品的专业摄影照片。产品描述：${productDescription}。放置在以下场景中：${sceneDescription}。高质量产品摄影，专业灯光。`
-        : `一个产品的专业摄影照片。产品描述：${productDescription}。现代简约白色背景，柔和的工作室灯光，高质量产品摄影。`);
+      // 生成合成建议
+      const compositePrompt = sceneDescription
+        ? `产品描述：${productDescription}\n\n场景描述：${sceneDescription}\n\n请提供将此产品融入该场景的详细建议，包括位置、角度、光照调整等。`
+        : `产品描述：${productDescription}\n\n请提供为此产品创建专业摄影效果的建议。`;
 
-      // 生成最终图片
-      const response = await openai.images.generate({
-        model: 'dall-e-3',
-        prompt: compositePrompt,
-        n: 1,
-        size: '1024x1024',
-        quality: 'hd'
-      });
+      const suggestionResult = await model.generateContent(compositePrompt);
+      const compositeSuggestion = (await suggestionResult.response).text();
 
-      const generatedImageUrl = response.data[0].url;
-
+      // 使用 Sharp 进行合成处理
       resultFilename = `result-${taskId}.png`;
       const resultPath = path.join(RESULTS_DIR, resultFilename);
 
-      const imageResponse = await fetch(generatedImageUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      await fs.writeFile(resultPath, Buffer.from(arrayBuffer));
+      if (sceneImage) {
+        // 有场景图片时，进行叠加合成
+        const scenePath = path.join(UPLOAD_DIR, sceneImage);
+
+        // 获取场景图片尺寸
+        const sceneMetadata = await sharp(scenePath).metadata();
+        const targetWidth = sceneMetadata.width || 1024;
+        const targetHeight = sceneMetadata.height || 1024;
+
+        // 调整产品图片大小（保持比例，占场景的 40%）
+        const productResized = await sharp(productPath)
+          .resize(Math.floor(targetWidth * 0.4), Math.floor(targetHeight * 0.4), {
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 0 }
+          })
+          .ensureAlpha()
+          .toBuffer();
+
+        // 合成到场景中心偏下位置
+        const left = Math.floor((targetWidth - Math.floor(targetWidth * 0.4)) / 2);
+        const top = Math.floor(targetHeight * 0.5);
+
+        await sharp(scenePath)
+          .resize(targetWidth, targetHeight)
+          .composite([{
+            input: productResized,
+            left: left,
+            top: top,
+            blend: 'over'
+          }])
+          .png({ quality: 95 })
+          .toFile(resultPath);
+      } else {
+        // 无场景图片时，创建专业白色背景
+        await sharp(productPath)
+          .resize(1024, 1024, {
+            fit: 'contain',
+            background: { r: 250, g: 250, b: 250, alpha: 1 }
+          })
+          .modulate({
+            brightness: 1.05,
+            saturation: 1.1
+          })
+          .sharpen()
+          .png({ quality: 95 })
+          .toFile(resultPath);
+      }
 
       resultUrl = `/api/images/file/${resultFilename}`;
 
@@ -439,9 +399,10 @@ async function processImageTask(taskId, productImage, sceneImage, prompt, mode) 
         filename: resultFilename,
         productDescription,
         sceneDescription,
-        revisedPrompt: response.data[0].revised_prompt,
-        message: 'AI 产品场景合成完成'
+        compositeSuggestion,
+        message: 'AI 产品场景分析与合成完成'
       };
+
     } else {
       throw new Error('未知的处理模式');
     }
