@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PostList from './components/PostList'
 import Editor from './components/Editor'
+import ImageEditor from './components/ImageEditor'
 import { getPosts, createPost, updatePost, deletePost } from './utils/api'
 
 export interface Post {
@@ -11,15 +12,20 @@ export interface Post {
   updatedAt: string
 }
 
+type AppMode = 'blog' | 'image-editor'
+
 function App() {
+  const [mode, setMode] = useState<AppMode>('image-editor')
   const [posts, setPosts] = useState<Post[]>([])
   const [currentPost, setCurrentPost] = useState<Post | null>(null)
   const [loading, setLoading] = useState(true)
 
   // 加载所有文章
   useEffect(() => {
-    loadPosts()
-  }, [])
+    if (mode === 'blog') {
+      loadPosts()
+    }
+  }, [mode])
 
   const loadPosts = async () => {
     try {
@@ -77,61 +83,126 @@ function App() {
     setCurrentPost(post)
   }
 
-  return (
-    <div className="flex h-screen bg-white">
-      {/* 左侧边栏 - 文章列表 */}
-      <div className="w-80 border-r border-notion-border flex flex-col">
-        <div className="p-4 border-b border-notion-border">
-          <h1 className="text-xl font-semibold text-notion-text mb-4">我的博客</h1>
-          <button
-            onClick={handleCreatePost}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors font-medium"
-          >
-            + 新建文章
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="p-4 text-center text-notion-secondary">加载中...</div>
-          ) : (
-            <PostList
-              posts={posts}
-              currentPost={currentPost}
-              onSelect={handleSelectPost}
-              onDelete={handleDeletePost}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* 右侧 - 编辑器 */}
-      <div className="flex-1 overflow-hidden">
-        {currentPost ? (
-          <Editor
-            post={currentPost}
-            onUpdate={handleUpdatePost}
-          />
-        ) : (
-          <div className="h-full flex items-center justify-center text-notion-secondary">
-            <div className="text-center">
-              <svg
-                className="w-24 h-24 mx-auto mb-4 text-notion-border"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                />
-              </svg>
-              <p className="text-lg">选择一篇文章或创建新文章</p>
+  // 图片编辑器模式
+  if (mode === 'image-editor') {
+    return (
+      <div className="min-h-screen">
+        {/* 导航栏 */}
+        <nav className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="flex items-center justify-between h-14">
+              <div className="flex items-center gap-6">
+                <span className="font-semibold text-gray-900">工作台</span>
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                  <button
+                    onClick={() => setMode('image-editor')}
+                    className="px-4 py-1.5 rounded-md text-sm font-medium transition bg-white text-gray-900 shadow-sm"
+                  >
+                    AI 图片编辑
+                  </button>
+                  <button
+                    onClick={() => setMode('blog')}
+                    className="px-4 py-1.5 rounded-md text-sm font-medium transition text-gray-600 hover:text-gray-900"
+                  >
+                    博客管理
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        )}
+        </nav>
+        {/* 内容区域 */}
+        <div className="pt-14">
+          <ImageEditor />
+        </div>
+      </div>
+    )
+  }
+
+  // 博客模式
+  return (
+    <div className="min-h-screen">
+      {/* 导航栏 */}
+      <nav className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-6">
+              <span className="font-semibold text-gray-900">工作台</span>
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                <button
+                  onClick={() => setMode('image-editor')}
+                  className="px-4 py-1.5 rounded-md text-sm font-medium transition text-gray-600 hover:text-gray-900"
+                >
+                  AI 图片编辑
+                </button>
+                <button
+                  onClick={() => setMode('blog')}
+                  className="px-4 py-1.5 rounded-md text-sm font-medium transition bg-white text-gray-900 shadow-sm"
+                >
+                  博客管理
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* 博客内容 */}
+      <div className="pt-14 flex h-screen bg-white">
+        {/* 左侧边栏 - 文章列表 */}
+        <div className="w-80 border-r border-notion-border flex flex-col">
+          <div className="p-4 border-b border-notion-border">
+            <h1 className="text-xl font-semibold text-notion-text mb-4">我的博客</h1>
+            <button
+              onClick={handleCreatePost}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors font-medium"
+            >
+              + 新建文章
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="p-4 text-center text-notion-secondary">加载中...</div>
+            ) : (
+              <PostList
+                posts={posts}
+                currentPost={currentPost}
+                onSelect={handleSelectPost}
+                onDelete={handleDeletePost}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* 右侧 - 编辑器 */}
+        <div className="flex-1 overflow-hidden">
+          {currentPost ? (
+            <Editor
+              post={currentPost}
+              onUpdate={handleUpdatePost}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-notion-secondary">
+              <div className="text-center">
+                <svg
+                  className="w-24 h-24 mx-auto mb-4 text-notion-border"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                  />
+                </svg>
+                <p className="text-lg">选择一篇文章或创建新文章</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
